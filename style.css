@@ -1,0 +1,297 @@
+  :root {
+    --bg-main: #0f111a;
+    --bg-card: #161925;
+    --bg-sidebar: #1f2336;
+    --text-main: #f8f9fa;
+    --text-muted: #939dbb;
+    --cyan: #00f0ff;
+    --green: #00ff66;
+    --red: #ff3366;
+    --border: #2b304a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+  body { background-color: var(--bg-main); color: var(--text-main); display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+  
+  #app { display: flex; width: 100%; height: 100%; }
+
+  /* SIDEBAR DI NAVIGAZIONE */
+  .sidebar { width: 280px; background-color: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 24px; flex-shrink: 0; }
+  .logo { font-size: 22px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px; margin-bottom: 32px; }
+  .logo .cyan { color: var(--cyan); }
+  .user-badge { background: rgba(255,255,255,0.03); border: 1px solid var(--border); padding: 12px; border-radius: 8px; margin-bottom: 24px; }
+  .user-mail { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-role { font-size: 11px; color: var(--cyan); text-transform: uppercase; font-weight: 700; margin-top: 4px; letter-spacing: 0.5px; }
+
+  .nav-menu { display: flex; flex-direction: column; gap: 8px; }
+  .nav-btn { background: none; border: none; color: var(--text-muted); text-align: left; padding: 12px 16px; font-size: 14px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; }
+  .nav-btn:hover, .nav-btn.active { background-color: rgba(0, 240, 255, 0.08); color: #ffffff; transform: translateX(4px); }
+  .nav-btn.active { border-left: 3px solid var(--cyan); color: var(--cyan); font-weight: 600; }
+
+  /* AREA CONTENUTO GENERALE */
+  .main-content { flex: 1; padding: 40px; overflow-y: auto; background-color: var(--bg-main); }
+  .header-title { margin-bottom: 32px; }
+  .header-title h2 { font-size: 28px; font-weight: 700; margin-bottom: 4px; color: #fff; }
+  .header-title p { color: var(--text-muted); font-size: 14px; }
+
+  /* CONTENITORI / SCHEDE */
+  .card { background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .mt-4 { margin-top: 24px; }
+  .mb-3 { margin-bottom: 16px; }
+  .max-w-md { max-width: 500px; }
+  .w-100 { width: 100%; }
+  .text-center { text-align: center; text-decoration: none; }
+
+  /* COMPONENTI DASHBOARD CALCOLATI */
+  .alerts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .widget-alert { border-radius: 10px; padding: 18px; display: flex; flex-direction: column; border-left: 4px solid #fff; background: rgba(255,255,255,0.01); border: 1px solid var(--border); }
+  .widget-alert.danger { border-left: 4px solid var(--red); background: rgba(255, 51, 102, 0.04); }
+  .widget-alert.warning { border-left: 4px solid #ffaa00; background: rgba(255, 170, 0, 0.04); }
+  .widget-alert.success { border-left: 4px solid var(--green); background: rgba(0, 255, 102, 0.04); }
+  .widget-alert.info { border-left: 4px solid var(--cyan); background: rgba(0, 240, 255, 0.04); }
+  .widget-alert .num { font-size: 36px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+  .widget-alert .label { font-size: 13px; color: var(--text-muted); font-weight: 500; }
+
+  /* TABELLE */
+  .table-wrapper { overflow-x: auto; margin-top: 10px; border-radius: 8px; border: 1px solid var(--border); background-color: var(--bg-card); }
+  .table-wrapper.compact td, .table-wrapper.compact th { padding: 8px 12px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+  th { background-color: rgba(255,255,255,0.02); padding: 14px 16px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+  th.sortable { cursor: pointer; user-select: none; transition: color 0.15s ease; }
+  th.sortable:hover { color: var(--cyan); }
+  th.sortable .sort-icon { display: inline-block; margin-left: 4px; color: var(--cyan); font-size: 10px; }
+  td { padding: 14px 16px; border-bottom: 1px solid var(--border); color: #e2e8f0; vertical-align: middle; }
+  tr:hover td { background-color: rgba(255,255,255,0.01); }
+  
+  /* STATI RIGHE */
+  tr.tr-danger td { background-color: rgba(255, 51, 102, 0.05); color: #ffb3c6; }
+  tr.tr-warning td { background-color: rgba(255, 170, 0, 0.05); color: #ffe6b3; }
+  .badge { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  /* BUGFIX: il markup genera classi come "badge farmaco", "badge carico", "badge modifica"
+     (categoria/tipo movimento in minuscolo) per differenziare visivamente le etichette
+     nelle tabelle Giacenze e Storico, ma nessuna di queste varianti era mai stata definita
+     nel CSS: tutti i badge risultavano quindi indistinguibili (stesso grigio neutro),
+     rendendo più lenta la lettura rapida delle tabelle. Colori coerenti con la palette
+     già in uso altrove (--green per gli ingressi, --red per uscite/eliminazioni, --cyan
+     per le modifiche, tonalità distinte per le categorie articolo). */
+  .badge.carico { background: rgba(0, 255, 102, 0.12); color: var(--green); }
+  .badge.scarico { background: rgba(0, 240, 255, 0.12); color: var(--cyan); }
+  .badge.modifica { background: rgba(255, 170, 0, 0.15); color: #ffaa00; }
+  .badge.eliminazione { background: rgba(255, 51, 102, 0.15); color: var(--red); }
+  .badge.farmaco { background: rgba(0, 240, 255, 0.12); color: var(--cyan); }
+  .badge.presidi { background: rgba(255, 170, 0, 0.15); color: #ffaa00; }
+  .badge.varie { background: rgba(255,255,255,0.08); color: var(--text-main); }
+  .badge.alimentari { background: rgba(179, 136, 255, 0.15); color: #b388ff; }
+
+  /* CAMPI INPUT E FORM */
+  .modern-form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group.full { grid-column: span 2; }
+  label { font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; }
+  input, select { background-color: var(--bg-main); border: 1px solid var(--border); padding: 12px; border-radius: 6px; color: #fff; font-size: 14px; width: 100%; transition: border 0.2s; }
+  input:focus, select:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(0,240,255,0.1); }
+  .search-input { width: 280px; padding: 10px; font-size: 13px; border-radius: 6px; }
+
+  /* BOTTONI */
+  .btn { border: none; padding: 12px 20px; border-radius: 6px; font-weight: 600; font-size: 14px; cursor: pointer; transition: opacity 0.2s; display: inline-block; text-align: center; }
+  .btn:hover { opacity: 0.85; }
+  .btn-success { background-color: var(--green); color: #000; }
+  .btn-danger { background-color: var(--red); color: #fff; }
+  .btn-primary { background-color: var(--cyan); color: #000; }
+  .btn-secondary { background-color: transparent; border: 1px solid var(--border); color: #fff; }
+  /* BUGFIX: il pulsante "🔄 Ripristina Backup" usa class="btn btn-warning", ma questa
+     variante non era mai stata definita: senza colore di sfondo, un'azione distruttiva
+     (sovrascrive l'intero database) risultava priva di un segnale visivo di attenzione,
+     a differenza di tutte le altre varianti .btn-*. Colore coerente con quello già
+     usato per lo stato "warning" altrove nell'app (.widget-alert.warning). */
+  .btn-warning { background-color: #ffaa00; color: #000; }
+  .btn-stack { display: flex; gap: 12px; flex-direction: column; }
+  .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 4px; }
+
+  /* LOGICA CAMBIO PANNELLI */
+  .tab-content { display: none; }
+  .tab-content.active { display: block; animation: smoothReveal 0.2s ease-in-out; }
+  @keyframes smoothReveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* MODALE MODIFICA ARTICOLO (ADMIN) */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; }
+  .modal-overlay.active { display: flex; }
+  .modal-box { background-color: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; animation: smoothReveal 0.15s ease-in-out; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .modal-header h3 { font-size: 18px; color: #fff; }
+  .modal-close { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 4px; }
+  .modal-close:hover { color: var(--red); }
+  .btn-icon { padding: 6px 10px; font-size: 13px; }
+
+  /* NOTIFICHE STATO */
+  .status-msg { margin-top: 16px; padding: 12px; border-radius: 6px; font-size: 13px; display: none; font-weight: 500; }
+  .status-msg.ok { display: block; background: rgba(0, 255, 102, 0.08); border: 1px solid var(--green); color: var(--green); }
+  .status-msg.err { display: block; background: rgba(255, 51, 102, 0.08); border: 1px solid var(--red); color: var(--red); }
+
+  /* ===================================================================== */
+  /* ADATTABILITÀ SMARTPHONE / TABLET                                       */
+  /* La barra superiore (.topbar) e l'overlay (.sidebar-overlay) esistono   */
+  /* sempre nel DOM ma restano nascosti su desktop: diventano visibili e    */
+  /* utilizzabili solo sotto la soglia --breakpoint-mobile definita qui.    */
+  /* ===================================================================== */
+
+  .topbar { display: none; align-items: center; gap: 12px; height: 56px; padding: 0 16px; background-color: var(--bg-sidebar); border-bottom: 1px solid var(--border); position: sticky; top: 0; left: 0; width: 100%; z-index: 1100; }
+  .topbar-logo { font-size: 17px; font-weight: 700; color: #fff; }
+  .topbar-logo .cyan { color: var(--cyan); }
+  .menu-toggle-btn { background: none; border: 1px solid var(--border); color: #fff; font-size: 20px; line-height: 1; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+  .menu-toggle-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+  .sidebar-close-btn { display: none; }
+  .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1150; }
+
+  /* TABLET: la sidebar resta visibile ma più stretta, i contenuti guadagnano spazio */
+  @media (max-width: 1024px) {
+    .sidebar { width: 220px; padding: 20px; }
+    .main-content { padding: 28px; }
+    .modern-form { gap: 16px; }
+  }
+
+  /* SMARTPHONE / TABLET STRETTO: la sidebar diventa un pannello a comparsa (off-canvas),
+     azionato dall'hamburger nella topbar; il layout dei form passa a colonna singola. */
+  @media (max-width: 860px) {
+    body { flex-direction: column; overflow: auto; height: auto; min-height: 100vh; }
+    #app { flex-direction: row; height: auto; min-height: calc(100vh - 56px); }
+
+    .topbar { display: flex; }
+    .sidebar-overlay.active { display: block; }
+
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      width: 260px;
+      max-width: 82vw;
+      z-index: 1200;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+      box-shadow: 6px 0 30px rgba(0,0,0,0.5);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-close-btn { display: block; position: absolute; top: 16px; right: 16px; background: none; border: none; color: var(--text-muted); font-size: 26px; line-height: 1; cursor: pointer; }
+    .sidebar-close-btn:hover { color: var(--red); }
+
+    .main-content { padding: 18px; width: 100%; }
+    .header-title h2 { font-size: 21px; }
+    .header-title p { font-size: 13px; }
+    .card { padding: 16px; border-radius: 10px; }
+
+    .grid-2 { grid-template-columns: 1fr; gap: 16px; }
+    .modern-form { grid-template-columns: 1fr; }
+    .form-group.full { grid-column: span 1; }
+
+    .alerts-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .widget-alert { padding: 14px; }
+    .widget-alert .num { font-size: 28px; }
+
+    .search-input { width: 100%; max-width: none !important; }
+
+    /* BUGFIX ADATTABILITÀ MOBILE: gli input avevano font-size:14px (regola generale
+       "input, select" più sopra). Su iOS Safari, qualsiasi campo con font-size inferiore
+       a 16px provoca uno zoom automatico indesiderato dell'intera pagina quando riceve
+       il focus (per evitare che l'utente non riesca a leggere il testo digitato):
+       l'utente si ritrova con la pagina "scattata" fuori scala ad ogni tap su un campo
+       dei form di Carico/Scarico/Impostazioni/Modifica Articolo, dovendo fare pinch-zoom
+       manuale per tornare alla visualizzazione normale. Si riporta il font a 16px sotto
+       la soglia mobile, così il browser non attiva più lo zoom automatico. */
+    input, select { font-size: 16px; }
+
+    table { font-size: 13px; }
+    th, td { padding: 10px 12px; }
+
+    .modal-box { max-width: 92vw; padding: 20px; }
+  }
+
+  @media (max-width: 480px) {
+    .main-content { padding: 14px; }
+    .topbar { padding: 0 12px; }
+    .card { padding: 14px; }
+    .btn { padding: 11px 16px; font-size: 13px; }
+  }
+
+/* =========================================================================
+   AGGIUNTE PER IL NUOVO MODELLO DI AUTENTICAZIONE (Email + OTP)
+   ========================================================================= */
+
+/* Nasconde il contenuto applicativo finché il login non è completato. Uso :not(.visible)
+   con !important per avere sempre priorità sulla regola .topbar dentro le media query
+   dello Stylesheet originale (che altrimenti mostrerebbe la topbar su mobile anche
+   prima del login, a prescindere dall'ordine delle regole nel foglio di stile). */
+#app:not(.visible) { display: none !important; }
+.topbar:not(.visible) { display: none !important; }
+
+/* Elementi riservati agli Admin: mostrati via JS impostando data-role="Admin" sul
+   <body> dopo il login (equivalente client-side dei vecchi blocchi <? if (userRole
+   === 'Admin') { ?> ... <? } ?> lato server). La sicurezza reale resta comunque
+   applicata dal backend (assicuraAdmin_ in Backup.js, controlli di ruolo in
+   Magazzino.js): questo è solo un accorgimento di interfaccia. */
+body:not([data-role="Admin"]) .admin-only { display: none !important; }
+
+/* SCHERMATA DI LOGIN */
+.login-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 24px;
+}
+.login-box {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px;
+  width: 100%;
+  max-width: 400px;
+}
+.login-logo {
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+  margin-bottom: 8px;
+}
+.login-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  margin-bottom: 28px;
+}
+.login-step { display: none; }
+.login-step.active { display: block; }
+.otp-input {
+  text-align: center;
+  font-size: 24px;
+  letter-spacing: 10px;
+  font-weight: 700;
+}
+.login-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 10px;
+  text-align: center;
+}
+.login-hint a, .login-hint button.link-btn {
+  background: none;
+  border: none;
+  color: var(--cyan);
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+  padding: 0;
+}
+.login-spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #000;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
