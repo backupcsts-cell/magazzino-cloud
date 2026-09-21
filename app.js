@@ -44,6 +44,14 @@
     loginStatus.className = 'status-msg' + (messaggio ? ' ' + (tipo || 'err') : '');
   }
 
+  // Timeout per singola chiamata. Le azioni pesanti (backup/ripristino su Drive) hanno
+  // un limite più alto; tutte le altre falliscono con un messaggio chiaro invece di
+  // lasciare la UI in "caricamento" all'infinito.
+  const TIMEOUT_DEFAULT_MS_ = 60 * 1000;
+  const TIMEOUT_LUNGO_MS_ = 5 * 60 * 1000;
+  const AZIONI_LUNGHE_ = ['backupManuale', 'ripristinaBackup'];
+  const AZIONI_DI_SCRITTURA_ = ['eseguiCarico', 'eseguiScarico', 'salvaModificaArticolo', 'eliminaArticoloCompleto', 'salvaGiorniAvviso', 'ripristinaBackup'];
+
   function grezzoFetch_(action, params, richiedeToken) {
     const sessione = leggiSessione_();
     const body = Object.assign(
@@ -51,21 +59,41 @@
       richiedeToken ? { token: sessione ? sessione.token : null } : {},
       params || {}
     );
+    const controller = new AbortController();
+    const timeoutMs = AZIONI_LUNGHE_.indexOf(action) !== -1 ? TIMEOUT_LUNGO_MS_ : TIMEOUT_DEFAULT_MS_;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
     return fetch(CFG.API_URL, {
       method: 'POST',
-      // BUGFIX/NOTA TECNICA: Content-Type "text/plain" (anziché "application/json") fa
-      // sì che il browser tratti questa POST come "simple request" e non invii una
-      // preflight OPTIONS, che i Web App di Apps Script non sanno gestire. Il corpo
-      // resta comunque una stringa JSON valida: il backend la fa il parsing con
-      // JSON.parse(e.postData.contents), indipendentemente dall'header dichiarato.
+      // Content-Type "text/plain" evita la preflight OPTIONS (non gestita da Apps Script).
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     })
-      .then(r => r.json())
-      .then(res => {
+      .then(r => r.text())
+      .then(txt => {
+        let res;
+        try { res = JSON.parse(txt); }
+        catch (e) {
+          // Apps Script risponde con una pagina HTML (non JSON) in caso di quota superata,
+          // timeout di esecuzione (6 min), deploy non aggiornato o permessi mancanti.
+          throw new Error('Risposta non valida dal server (quota superata, timeout dello script o deployment non aggiornato). Controlla Esecuzioni in Apps Script.');
+        }
         if (!res.ok) throw new Error(res.error || 'Errore sconosciuto.');
         return res.data;
-      });
+      })
+      .catch(err => {
+        if (err && err.name === 'AbortError') {
+          throw new Error(
+            'Il server non ha risposto entro ' + Math.round(timeoutMs / 1000) + ' secondi.' +
+            (AZIONI_DI_SCRITTURA_.indexOf(action) !== -1
+              ? ' ATTENZIONE: l\'operazione potrebbe essere stata comunque registrata. Controlla lo Storico Movimenti prima di ripetere.'
+              : ' Riprova.')
+          );
+        }
+        throw err;
+      })
+      .finally(() => clearTimeout(timer));
   }
 
   function leggiSessione_() {
@@ -221,14 +249,31 @@
     };
     Object.keys(MAPPA_AZIONI_).forEach(nome => {
       proxy[nome] = function (...args) {
-        MAPPA_AZIONI_[nome](args)
-          .then(risultato => { if (successHandler) successHandler(risultato); })
-          .catch(err => { if (failureHandler) failureHandler(err); else console.error(err); });
-        // Ogni chiamata usa la propria coppia di handler "una tantum": si azzerano
-        // subito dopo l'uso, così una chiamata successiva senza handler espliciti non
-        // riusa per errore quelli di una chiamata precedente.
+        // FIX CRITICO: gli handler vanno CATTURATI in costanti locali al momento della
+        // chiamata. Prima venivano azzerati subito dopo l'avvio della richiesta, mentre i
+        // .then()/.catch() li leggevano più tardi (in modo asincrono): a quel punto erano
+        // già null, quindi né il success né il failure handler venivano mai eseguiti e la
+        // UI restava per sempre in "Caricamento..." / "Registrazione in corso...".
+        const onOk = successHandler;
+        const onErr = failureHandler;
         successHandler = null;
         failureHandler = null;
+
+        MAPPA_AZIONI_[nome](args).then(
+          risultato => {
+            if (!onOk) return;
+            try { onOk(risultato); }
+            catch (e) { console.error('Errore nel success handler di ' + nome + ':', e); }
+          },
+          err => {
+            if (onErr) {
+              try { onErr(err); }
+              catch (e) { console.error('Errore nel failure handler di ' + nome + ':', e); }
+            } else {
+              console.error(err);
+            }
+          }
+        );
       };
     });
     return proxy;
