@@ -840,6 +840,7 @@ if (formCarico) {
           // Il reset riporta "Categoria / Tipo" alla prima opzione: riallinea di
           // conseguenza l'obbligatorietà del campo Lotto (vedi aggiornaObbligoLottoCarico_).
           aggiornaObbligoLottoCarico_();
+          if (res.refreshNecessario) init();
           localGiacenze = res.nuoveGiacenze || localGiacenze;
           if (res.nuoviAlerts) { localAlerts = res.nuoviAlerts; renderizzaDashboard(res.nuoviAlerts); }
           renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
@@ -883,6 +884,7 @@ if (formScarico) {
         if (res.success) {
           this.reset();
           if (document.getElementById('selectScaricoRapido')) document.getElementById('selectScaricoRapido').value = "";
+          if (res.refreshNecessario) init();
           localGiacenze = res.nuoveGiacenze || localGiacenze;
           if (res.nuoviAlerts) { localAlerts = res.nuoviAlerts; renderizzaDashboard(res.nuoviAlerts); }
           renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
@@ -1269,6 +1271,7 @@ if (formModifica) {
       .withSuccessHandler(res => {
         if (res.success) {
           document.getElementById('modaleModificaArticolo').classList.remove('active');
+          if (res.refreshNecessario) init();
           localGiacenze = res.nuoveGiacenze || localGiacenze;
           if (res.nuoviAlerts) { localAlerts = res.nuoviAlerts; renderizzaDashboard(res.nuoviAlerts); }
           renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
@@ -1364,7 +1367,8 @@ function eseguiEliminaArticolo(codice, descrizione) {
 
   google.script.run.withSuccessHandler(res => {
     if (res.success) {
-      localGiacenze = res.nuoveGiacenze || localGiacenze;
+      if (res.refreshNecessario) init();
+          localGiacenze = res.nuoveGiacenze || localGiacenze;
       if (res.nuoviAlerts) { localAlerts = res.nuoviAlerts; renderizzaDashboard(res.nuoviAlerts); }
       renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
       popolaTendinaScarico(localGiacenze);
