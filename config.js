@@ -14,5 +14,5 @@
  */
 window.MAGAZZINO_CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbySvaW-bXt7iwjrqRdjiq4aKlS83LbqdPkEpwpdB1z1MjJ6dC7sRTiAHDhaczwCRRSp/exec',
-  APP_KEY: 'k8X9m#2Pz$7vLq!4Rt5Yw*1NcF8h%3Jb*6Dx^9$m'
+  APP_KEY: 'ae251859b38c75425ea019a57e5b52ed24b76525a4526fab'
 };
