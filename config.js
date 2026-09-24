@@ -13,6 +13,6 @@
  *    ancora della verifica Email+OTP. Usa una stringa lunga e casuale.
  */
 window.MAGAZZINO_CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbySvaW-bXt7iwjrqRdjiq4aKlS83LbqdPkEpwpdB1z1MjJ6dC7sRTiAHDhaczwCRRSp/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyPS8ZAeO3D5M7PVam-6YqUy6KsoDAbeFaKq1wcopgRY85nkIjoemyhXcj4FfCn6W1Aeg/exec',
   APP_KEY: 'ae251859b38c75425ea019a57e5b52ed24b76525a4526fab'
 };
