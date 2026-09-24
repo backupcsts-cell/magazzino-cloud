@@ -68,6 +68,12 @@
   /* STATI RIGHE */
   tr.tr-danger td { background-color: rgba(255, 51, 102, 0.05); color: #ffb3c6; }
   tr.tr-warning td { background-color: rgba(255, 170, 0, 0.05); color: #ffe6b3; }
+  /* Lotto non ancora scaduto ma entro la soglia "Priorità di Utilizzo" (FEFO): va usato
+     prima degli altri lotti dello stesso articolo. Evidenziato in rosso (più marcato del
+     semplice "in scadenza" arancione) per farlo risaltare subito nella tabella Giacenze. */
+  tr.tr-priority td { background-color: rgba(255, 51, 102, 0.09); color: #ffb3c6; }
+  tr.tr-priority td:first-child { border-left: 3px solid var(--red); }
+  .badge.priorita { background: rgba(255, 51, 102, 0.18); color: var(--red); }
   .badge { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
   /* BUGFIX: il markup genera classi come "badge farmaco", "badge carico", "badge modifica"
      (categoria/tipo movimento in minuscolo) per differenziare visivamente le etichette

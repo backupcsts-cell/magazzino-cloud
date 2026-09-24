@@ -50,7 +50,7 @@
   const TIMEOUT_DEFAULT_MS_ = 60 * 1000;
   const TIMEOUT_LUNGO_MS_ = 5 * 60 * 1000;
   const AZIONI_LUNGHE_ = ['backupManuale', 'ripristinaBackup'];
-  const AZIONI_DI_SCRITTURA_ = ['eseguiCarico', 'eseguiScarico', 'salvaModificaArticolo', 'eliminaArticoloCompleto', 'salvaGiorniAvviso', 'ripristinaBackup'];
+  const AZIONI_DI_SCRITTURA_ = ['eseguiCarico', 'eseguiScarico', 'salvaModificaArticolo', 'eliminaArticoloCompleto', 'salvaGiorniAvviso', 'salvaGiorniPriorita', 'salvaImpostazioniScadenza', 'ripristinaBackup'];
 
   function grezzoFetch_(action, params, richiedeToken) {
     const sessione = leggiSessione_();
@@ -173,7 +173,7 @@
     if (!emailInAttesa) return;
     mostraStatoLogin_('Invio di un nuovo codice...', 'ok');
     grezzoFetch_('richiediOtp', { email: emailInAttesa }, false)
-      .then(() => mostraStatoLogin_('Nuovo codice inviato.', 'ok'))
+      .then(() => mostraStatoLogin_('Se l\'indirizzo è abilitato e non è bloccato, riceverai un nuovo codice a breve.', 'ok'))
       .catch(err => mostraStatoLogin_(err.message, 'err'));
   });
 
@@ -181,11 +181,16 @@
     const sess = leggiSessione_();
     cancellaSessione_();
     if (sess && sess.token) {
-      // Best-effort: revoca la sessione anche lato server. Non blocca il logout locale
-      // se la chiamata fallisce (es. sessione già scaduta).
-      grezzoFetch_('logout', { token: sess.token }, false).catch(() => {});
+      // v10: prima il reload partiva SUBITO dopo la fetch e il browser poteva annullare la
+      // richiesta prima che il server revocasse la sessione. Si attende la risposta (max 4 s,
+      // per non bloccare il logout se il server non risponde) e poi si ricarica.
+      Promise.race([
+        grezzoFetch_('logout', { token: sess.token }, false).catch(() => {}),
+        new Promise(resolve => setTimeout(resolve, 4000))
+      ]).then(() => window.location.reload());
+    } else {
+      window.location.reload();
     }
-    window.location.reload();
   });
 
   function entraNellApp_(sess) {
@@ -206,15 +211,24 @@
   // 2) callApi() + shim di google.script.run
   // ---------------------------------------------------------------------
 
+  let sessioneScadutaGestita_ = false;
   function callApi(action, params) {
     return grezzoFetch_(action, params, true).catch(err => {
       // Se il backend rifiuta la sessione (scaduta o revocata), forziamo un nuovo
       // login pulito invece di lasciare l'utente bloccato su una schermata rotta.
       const msg = String(err.message || '');
-      if (msg.indexOf('Sessione') !== -1 || msg.indexOf('non autorizzat') !== -1) {
-        cancellaSessione_();
-        alert('Sessione scaduta o non valida. Effettua nuovamente il login.');
-        window.location.reload();
+      // v11: solo i veri errori di sessione (prima anche "Richiesta non autorizzata", cioè App-Key errata, mostrava "Sessione scaduta").
+      if (msg.indexOf('Sessione') === 0 || msg === 'Accesso non autorizzato.') {
+        // v10: con più chiamate in parallelo (o con l'handler di errore di init) l'alert
+        // compariva più volte. Si gestisce UNA sola volta e la promise resta pendente, così
+        // i failure handler dei chiamanti non mostrano un secondo messaggio: la pagina si ricarica.
+        if (!sessioneScadutaGestita_) {
+          sessioneScadutaGestita_ = true;
+          cancellaSessione_();
+          alert('Sessione scaduta o non valida. Effettua nuovamente il login.');
+          window.location.reload();
+        }
+        return new Promise(function () {});
       }
       throw err;
     });
@@ -229,12 +243,15 @@
     eseguiScarico: (a) => callApi('eseguiScarico', { dati: a[0] }),
     salvaModificaArticolo: (a) => callApi('salvaModificaArticolo', { codice: a[0], descrizione: a[1], tipo: a[2], scortaMinima: a[3], note: a[4] }),
     eliminaArticoloCompleto: (a) => callApi('eliminaArticoloCompleto', { codice: a[0] }),
-    getStoricoMovimenti: (a) => callApi('getStoricoMovimenti', { query: a[0], filtroOperazione: a[1], offset: a[2], limit: a[3] }),
+    getStoricoMovimenti: (a) => callApi('getStoricoMovimenti', { query: a[0], filtroOperazione: a[1], offset: a[2], limit: a[3], ordine: a[4] }),
     esportaGiacenzeCSV: () => callApi('esportaGiacenzeCSV'),
     esportaStoricoCSV: (a) => callApi('esportaStoricoCSV', { filtroCodice: a[0] }),
     generaHtmlPdfGiacenze: () => callApi('generaHtmlPdfGiacenze'),
     generaHtmlPdfSottoScorta: () => callApi('generaHtmlPdfSottoScorta'),
     salvaGiorniAvviso: (a) => callApi('salvaGiorniAvviso', { giorni: a[0] }),
+    salvaGiorniPriorita: (a) => callApi('salvaGiorniPriorita', { giorni: a[0] }),
+    salvaImpostazioniScadenza: (a) => callApi('salvaImpostazioniScadenza', { giorniAvviso: a[0], giorniPriorita: a[1] }),
+    inviaNotificaScadenze: () => callApi('inviaNotificaScadenze'),
     backupManuale: () => callApi('backupManuale'),
     elencoBackup: () => callApi('elencoBackup'),
     ripristinaBackup: (a) => callApi('ripristinaBackup', { fileId: a[0] })
@@ -313,6 +330,8 @@ let storicoOperazioneCorrente = 'DEFAULT';
 let storicoHaAltri = false;
 let storicoTotaleRighe = 0;
 let storicoCaricamentoInCorso = false;
+let storicoRichiestaId = 0;          // v10: scarta le risposte di richieste superate da una più recente
+let storicoOrdineCorrente = 'desc';  // v10: ordine (asc/desc) applicato dal server
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -356,10 +375,24 @@ function formattaDataItaliana(stringaData) {
   return d.toLocaleDateString('it-IT');
 }
 
+// v10: il backend invia le date/ore come "yyyy-MM-dd HH:mm:ss" (con lo SPAZIO). Non è un
+// formato ISO valido: alcune versioni di Safari/iOS restituiscono Invalid Date. Si costruisce
+// la data dai componenti (ora locale), come già fatto per le date di sola scadenza.
+function parseDataOra(stringa) {
+  if (!stringa) return null;
+  const m = String(stringa).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    const dt = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+  const dt = new Date(stringa);
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
 function formattaDataOraItaliana(stringaDataOra) {
   if (!stringaDataOra) return '';
-  const d = new Date(stringaDataOra);
-  if (isNaN(d.getTime())) return escapeHtml(stringaDataOra);
+  const d = parseDataOra(stringaDataOra);
+  if (!d) return escapeHtml(stringaDataOra);
   return d.toLocaleString('it-IT');
 }
 
@@ -406,7 +439,23 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
       aggiornaListaBackup();
     }
     if (this.dataset.tab === 'storico') {
-      eseguiCaricaStorico('');
+      // BUGFIX: qui veniva sempre passata una stringa vuota, azzerando in silenzio
+      // qualunque ricerca già digitata dall'utente (il campo testo restava però invariato
+      // a video, mostrando ancora il vecchio valore): bastava riaprire il tab Storico, o
+      // anche solo cliccarlo di nuovo, perché la ricerca "sparisse" senza che nulla lo
+      // segnalasse, dando l'impressione che le ricerche "non funzionassero bene". Si
+      // ricarica invece con il valore attualmente presente nel campo di ricerca, così
+      // risultati mostrati e testo del campo restano sempre coerenti fra loro.
+      const queryAttuale = document.getElementById('storicoFiltroRicerca') ? document.getElementById('storicoFiltroRicerca').value : '';
+      eseguiCaricaStorico(queryAttuale);
+    }
+    if (this.dataset.tab === 'dashboard') {
+      // BUGFIX: la Dashboard veniva popolata una sola volta all'avvio (init()) e mai più
+      // ricaricata dal server nel corso della sessione, a differenza dei tab "Storico" ed
+      // "Esporta" che già si aggiornano al click. Chi restava collegato a lungo, operando
+      // su altri tab (anche da un altro dispositivo/utente), tornando su Dashboard vedeva
+      // quindi giacenze e avvisi non più aggiornati. Si ricarica ora da capo ogni volta.
+      ricaricaDashboardDalServer_();
     }
 
     // Su smartphone/tablet il menu si chiude automaticamente dopo la selezione,
@@ -417,10 +466,19 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 
 function init() {
   google.script.run.withSuccessHandler(data => {
+    // v11: il ruolo effettivo lo decide il server (foglio Utenti). Se è cambiato dopo il login
+    // (es. Admin retrocesso a Operatore) si aggiorna la sessione salvata e si ricarica la pagina,
+    // così pulsanti e voci di menu corrispondono ai permessi reali.
+    if (data.userRole && data.userRole !== USER_ROLE) {
+      const sessSalvata = leggiSessione_();
+      if (sessSalvata) { sessSalvata.role = data.userRole; salvaSessione_(sessSalvata); }
+      window.location.reload();
+      return;
+    }
     localGiacenze = data.giacenze;
     localAlerts = data.alerts;
     renderizzaDashboard(data.alerts);
-    renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
+    applicaFiltroGiacenzeCorrente_();
     aggiornaIndicatoreOrdinamento('thGiacenzeScadenza', giacenzeSortDir);
     aggiornaIndicatoreOrdinamento('thStoricoData', storicoSortDir);
     
@@ -428,6 +486,8 @@ function init() {
 
     const inputGiorni = document.querySelector('#formImpostazioni [name=giorniAvviso]');
     if (inputGiorni) inputGiorni.value = data.config.GiorniAvvisoScadenza || 30;
+    const inputGiorniPriorita = document.querySelector('#formImpostazioni [name=giorniPriorita]');
+    if (inputGiorniPriorita) inputGiorniPriorita.value = data.config.GiorniPrioritaScadenza || 7;
     
     const linkSheet = document.getElementById('linkSheet');
     if (linkSheet && data.spreadsheetUrl) linkSheet.href = data.spreadsheetUrl;
@@ -589,6 +649,57 @@ function renderizzaDashboard(alerts) {
     panel.appendChild(card);
   });
   renderizzaSottoScorta(alerts.sottoScorta);
+  renderizzaScadenzePrioritarie(alerts);
+}
+
+// Pannello "Prodotti in Scadenza — Priorità di Utilizzo": elenca, in ordine di urgenza
+// (dal più urgente al meno urgente, stesso ordinamento FEFO già calcolato dal backend in
+// getAlerts), prima i lotti scaduti e poi quelli entro la soglia di priorità, segnando
+// entrambi in rosso perché richiedono un'azione (smaltimento o utilizzo immediato).
+// I lotti "in scadenza" ma oltre la soglia di priorità non compaiono qui (restano
+// comunque visibili, in arancione, nella tabella Giacenze sottostante).
+function renderizzaScadenzePrioritarie(alerts) {
+  const box = document.getElementById('scadenzePrioritarieBox');
+  const container = document.getElementById('scadenzePrioritarieDettaglio');
+  if (!box || !container) return;
+
+  const scaduti = (alerts && alerts.scaduti) || [];
+  const prioritari = ((alerts && alerts.inScadenza) || []).filter(g => g.prioritario);
+
+  if (scaduti.length === 0 && prioritari.length === 0) {
+    box.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  box.style.display = 'block';
+  container.innerHTML = '';
+
+  function rigaBox_(g, etichetta, testoGiorni) {
+    const div = document.createElement('div');
+    div.style.background = 'rgba(255,255,255,0.02)';
+    div.style.border = '1px solid rgba(255,51,102,0.15)';
+    div.style.borderLeft = '3px solid var(--red)';
+    div.style.borderRadius = '6px';
+    div.style.padding = '10px 14px';
+    div.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:12px; flex-wrap:wrap;">
+        <strong style="color:#fff; font-size:13px;">${escapeHtml(g.codice)} — ${escapeHtml(g.descrizione)}</strong>
+        <span class="badge priorita" style="font-size:11px; padding:3px 8px;">${escapeHtml(etichetta)}</span>
+      </div>
+      <div style="margin-top:6px; font-size:12px; color:var(--red); display:flex; flex-wrap:wrap; gap:8px;">
+        <span>• Lotto: ${escapeHtml(g.lotto || 'N.D.')} — Disponibile: ${g.quantita} pz — ${escapeHtml(testoGiorni)}</span>
+      </div>
+    `;
+    container.appendChild(div);
+  }
+
+  scaduti.forEach(g => {
+    rigaBox_(g, '⛔ SCADUTO', `Scaduto da ${Math.abs(g.giorniMancanti)} giorni`);
+  });
+  prioritari.forEach(g => {
+    const testo = g.giorniMancanti === 0 ? 'Scade OGGI' : `Scade tra ${g.giorniMancanti} giorni`;
+    rigaBox_(g, '🔴 USARE PRIMA', testo);
+  });
 }
 
 function renderizzaSottoScorta(lista) {
@@ -656,7 +767,8 @@ function renderizzaTabellaGiacenze(elenco, alerts) {
 
   const oggi = new Date(); oggi.setHours(0,0,0,0);
   const giorniConfig = (alerts && alerts.giorniAvviso) ? Number(alerts.giorniAvviso) : 30;
-  const limiteAvviso = new Date(oggi.getTime() + giorniConfig * 24 * 60 * 60 * 1000);
+  const giorniPriorita = (alerts && alerts.giorniPriorita) ? Number(alerts.giorniPriorita) : 7;
+  const MS_GIORNO = 24 * 60 * 60 * 1000;
 
   elenco.forEach(g => {
     // BUGFIX: le classi CSS reali definite in Stylesheet.html per evidenziare le righe
@@ -666,7 +778,14 @@ function renderizzaTabellaGiacenze(elenco, alerts) {
     // stile corrispondente, quindi NESSUNA riga risultava mai evidenziata (né rossa né
     // arancione) nella tabella "Giacenze Correnti", nonostante il calcolo della scadenza
     // fosse corretto.
+    //
+    // NOVITÀ - Priorità di Utilizzo (FEFO): un lotto non ancora scaduto, ma con scadenza
+    // entro la soglia più stretta "Giorni Priorità" (Impostazioni), viene evidenziato in
+    // ROSSO (classe "tr-priority") invece che nel semplice arancione "in scadenza": segnala
+    // che va usato PRIMA degli altri lotti dello stesso articolo. Oltre quella soglia, ma
+    // ancora entro la soglia generale di preavviso, resta il tradizionale arancione.
     let rigaClasse = '';
+    let priorita = false;
     if (g.scadenza) {
       // BUGFIX FUSO ORARIO: vedi parseDataSolaData() sopra. Con new Date(g.scadenza) su
       // browser con fuso orario indietro rispetto a UTC, questa riga poteva classificare
@@ -677,8 +796,15 @@ function renderizzaTabellaGiacenze(elenco, alerts) {
       // (null <= oggetto Date equivale a 0 <= timestamp, sempre vero): senza questo
       // controllo un lotto con scadenza non valida risulterebbe erroneamente evidenziato
       // come "In Scadenza".
-      if (d && d < oggi) rigaClasse = 'tr-danger';
-      else if (d && d <= limiteAvviso) rigaClasse = 'tr-warning';
+      // v10: confronto in GIORNI di calendario (arrotondati), non in millisecondi: con
+      // oggi + N*24h un lotto in scadenza esattamente tra N giorni veniva escluso quando
+      // l'intervallo attraversa il cambio ora solare/legale.
+      if (d) {
+        const gm = Math.round((d.getTime() - oggi.getTime()) / MS_GIORNO);
+        if (gm < 0) rigaClasse = 'tr-danger';
+        else if (gm <= giorniPriorita) { rigaClasse = 'tr-priority'; priorita = true; }
+        else if (gm <= giorniConfig) rigaClasse = 'tr-warning';
+      }
     }
 
     const tr = document.createElement('tr');
@@ -720,6 +846,7 @@ function renderizzaTabellaGiacenze(elenco, alerts) {
     tr.dataset.scadenza = g.scadenza || '';
     tr.dataset.scortaMinima = Number(g.scortaMinima || 0);
     tr.dataset.note = g.note || '';
+    tr.dataset.noteProdotto = g.noteProdotto || ''; // v10: nota di ANAGRAFICA (Prodotti), non quella del lotto
 
     // BUGFIX SICUREZZA (Stored XSS): il testo del badge (g.tipo) era già correttamente
     // passato da escapeHtml(), ma il valore usato per COSTRUIRE il nome della classe CSS
@@ -736,7 +863,7 @@ function renderizzaTabellaGiacenze(elenco, alerts) {
       <td>${escapeHtml(g.descrizione)}${notaIcona}</td>
       <td><span class="badge ${escapeHtml(String(g.tipo).toLowerCase())}">${escapeHtml(g.tipo)}</span></td>
       <td><span style="font-family:monospace; background:rgba(255,255,255,0.05); padding:2px 6px; border-radius:4px;">${escapeHtml(g.lotto || 'N.D.')}</span></td>
-      <td>${formattaDataItaliana(g.scadenza)}</td>
+      <td>${formattaDataItaliana(g.scadenza)}${priorita ? ' <span class="badge priorita" title="Priorità di utilizzo: usare questo lotto prima degli altri">🔴 Usare prima</span>' : ''}</td>
       <td style="text-align:right;"><strong>${g.quantita}</strong></td>
       <td style="font-size:11px; color:var(--text-muted);">${formattaDataOraItaliana(g.ultimoAggiornamento)}</td>
       ${azioniMovimento}
@@ -772,7 +899,7 @@ if (tabellaGiacenzeBody) {
     const d = tr.dataset;
     switch (btn.dataset.action) {
       case 'modifica':
-        apriModaleModifica(d.codice, d.descrizione, d.tipo, d.scortaMinima, d.note);
+        apriModaleModifica(d.codice, d.descrizione, d.tipo, d.scortaMinima, d.noteProdotto);
         break;
       case 'elimina':
         eseguiEliminaArticolo(d.codice, d.descrizione);
@@ -796,23 +923,96 @@ if (thGiacenzeScadenza) {
     
     document.querySelectorAll('#tabellaGiacenze th .sort-icon').forEach(i => i.textContent = '');
     aggiornaIndicatoreOrdinamento('thGiacenzeScadenza', giacenzeSortDir);
-    renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
+    // BUGFIX: riordinare per scadenza azzerava, senza motivo, un eventuale filtro di
+    // ricerca già digitato in "cercaGiacenze" (renderizzava sempre l'elenco COMPLETO
+    // localGiacenze, ignorando il filtro attivo). Si usa ora la stessa funzione
+    // centralizzata che applica ordinamento E filtro corrente insieme.
+    applicaFiltroGiacenzeCorrente_();
   });
+}
+
+// BUGFIX: la ricerca live "cercaGiacenze" e il ricaricamento dati (init/carico/scarico/
+// modifica/elimina/refresh Dashboard) erano due percorsi indipendenti che non si
+// parlavano: ogni volta che arrivavano dati freschi dal server, la tabella veniva
+// ri-renderizzata con l'elenco COMPLETO (applicaOrdinamentoGiacenze(localGiacenze)),
+// perdendo silenziosamente un'eventuale ricerca già digitata dall'utente. Centralizzando
+// qui la logica di filtro, ogni punto del codice che aggiorna localGiacenze può
+// semplicemente richiamare questa funzione: il filtro attualmente scritto in
+// "cercaGiacenze" (se presente) resta sempre applicato ai dati più recenti.
+function applicaFiltroGiacenzeCorrente_() {
+  const inputEl = document.getElementById('cercaGiacenze');
+  const query = inputEl ? inputEl.value.toLowerCase().trim() : '';
+  const filtrate = query
+    ? localGiacenze.filter(g =>
+        g.codice.toLowerCase().includes(query) ||
+        g.descrizione.toLowerCase().includes(query) ||
+        (g.lotto && g.lotto.toLowerCase().includes(query)) ||
+        g.tipo.toLowerCase().includes(query)
+      )
+    : localGiacenze;
+  renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(filtrate), localAlerts);
 }
 
 const inputCercaGiacenze = document.getElementById('cercaGiacenze');
 if (inputCercaGiacenze) {
-  inputCercaGiacenze.addEventListener('input', function() {
-    const query = this.value.toLowerCase().trim();
-    const filtrate = localGiacenze.filter(g => 
-      g.codice.toLowerCase().includes(query) || 
-      g.descrizione.toLowerCase().includes(query) || 
-      (g.lotto && g.lotto.toLowerCase().includes(query)) ||
-      g.tipo.toLowerCase().includes(query)
-    );
-    renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(filtrate), localAlerts);
+  inputCercaGiacenze.addEventListener('input', applicaFiltroGiacenzeCorrente_);
+}
+
+// BUGFIX: la Dashboard non veniva mai ricaricata dal server dopo il primo avvio (vedi
+// nav-btn "dashboard" più sopra). Questa funzione rilegge Giacenze e Avvisi dal backend e
+// aggiorna tutta la Dashboard (riepilogo, pannello priorità/scadenze, sotto-scorta e
+// tabella Giacenze), riapplicando anche un eventuale filtro di ricerca già attivo.
+function ricaricaDashboardDalServer_() {
+  google.script.run
+    .withSuccessHandler(giacenze => {
+      localGiacenze = giacenze;
+      applicaFiltroGiacenzeCorrente_();
+      popolaTendinaScarico(localGiacenze);
+    })
+    .withFailureHandler(err => {
+      console.error('Errore nel ricaricamento delle giacenze:', err);
+    })
+    .getGiacenze();
+
+  google.script.run
+    .withSuccessHandler(alerts => {
+      localAlerts = alerts;
+      renderizzaDashboard(alerts);
+      // La tabella Giacenze dipende anche dagli Avvisi (soglie di evidenziazione
+      // rosso/arancione): la si ri-renderizza anche qui, nel caso la chiamata a
+      // getAlerts() risponda dopo quella a getGiacenze() qui sopra.
+      applicaFiltroGiacenzeCorrente_();
+    })
+    .withFailureHandler(err => {
+      console.error('Errore nel ricaricamento degli avvisi:', err);
+    })
+    .getAlerts();
+}
+
+const btnInviaNotificaScadenze = document.getElementById('btnInviaNotificaScadenze');
+if (btnInviaNotificaScadenze) {
+  btnInviaNotificaScadenze.addEventListener('click', () => {
+    btnInviaNotificaScadenze.disabled = true;
+    btnInviaNotificaScadenze.textContent = 'Invio in corso...';
+    google.script.run
+      .withSuccessHandler(res => {
+        btnInviaNotificaScadenze.disabled = false;
+        btnInviaNotificaScadenze.textContent = '📧 Invia Notifica Scadenze';
+        if (res.inviata) {
+          alert(`Notifica inviata a ${res.destinatari} amministratore/i (${res.totaleSegnalati} prodotto/i segnalati).`);
+        } else {
+          alert(res.motivo || 'Nessuna notifica inviata.');
+        }
+      })
+      .withFailureHandler(err => {
+        btnInviaNotificaScadenze.disabled = false;
+        btnInviaNotificaScadenze.textContent = '📧 Invia Notifica Scadenze';
+        alert('Errore durante l\'invio della notifica: ' + err.message);
+      })
+      .inviaNotificaScadenze();
   });
 }
+
 
 const formCarico = document.getElementById('formCarico');
 if (formCarico) {
@@ -843,7 +1043,7 @@ if (formCarico) {
           if (res.refreshNecessario) init();
           localGiacenze = res.nuoveGiacenze || localGiacenze;
           if (res.nuoviAlerts) { localAlerts = res.nuoviAlerts; renderizzaDashboard(res.nuoviAlerts); }
-          renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
+          applicaFiltroGiacenzeCorrente_();
           popolaTendinaScarico(localGiacenze);
           alert('Carico registrato con successo.');
         }
@@ -887,7 +1087,7 @@ if (formScarico) {
           if (res.refreshNecessario) init();
           localGiacenze = res.nuoveGiacenze || localGiacenze;
           if (res.nuoviAlerts) { localAlerts = res.nuoviAlerts; renderizzaDashboard(res.nuoviAlerts); }
-          renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
+          applicaFiltroGiacenzeCorrente_();
           popolaTendinaScarico(localGiacenze);
           alert('Scarico registrato con successo.');
         }
@@ -930,7 +1130,11 @@ if (btnResetStorico) {
 // le pagine successive caricate con "Carica altre".
 function eseguiCaricaStorico(query, aggiungi) {
   const tbody = document.querySelector('#tabellaStorico tbody');
-  if (!tbody || storicoCaricamentoInCorso) return;
+  if (!tbody) return;
+  // v10: "Carica altre" non può sovrapporsi a un caricamento in corso, ma una NUOVA ricerca/
+  // filtro/reset non viene più scartata in silenzio: prevale e le risposte vecchie vengono ignorate.
+  if (aggiungi && storicoCaricamentoInCorso) return;
+  const richiestaId = ++storicoRichiestaId;
   storicoCaricamentoInCorso = true;
 
   const offsetRichiesto = aggiungi ? storicoOffset : 0;
@@ -938,6 +1142,7 @@ function eseguiCaricaStorico(query, aggiungi) {
   if (!aggiungi) {
     storicoQueryCorrente = query || '';
     storicoOperazioneCorrente = document.getElementById('storicoFiltroOperazione').value;
+    storicoOrdineCorrente = storicoSortDir;
     storicoOffset = 0;
     storicoDatiCorrenti = [];
     tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:24px;">Caricamento storico in corso...</td></tr>';
@@ -946,6 +1151,7 @@ function eseguiCaricaStorico(query, aggiungi) {
 
   google.script.run
     .withSuccessHandler(risultato => {
+      if (richiestaId !== storicoRichiestaId) return; // risposta superata
       storicoDatiCorrenti = aggiungi ? storicoDatiCorrenti.concat(risultato.righe) : risultato.righe;
       storicoOffset = offsetRichiesto + risultato.righe.length;
       storicoHaAltri = risultato.haAltri;
@@ -960,6 +1166,7 @@ function eseguiCaricaStorico(query, aggiungi) {
       aggiornaBottoneCaricaAltriStorico_(false);
     })
     .withFailureHandler(err => {
+      if (richiestaId !== storicoRichiestaId) return;
       storicoCaricamentoInCorso = false;
       if (!aggiungi) {
         // BUGFIX: err.message veniva inserito qui senza escapeHtml(), a differenza dello
@@ -975,7 +1182,7 @@ function eseguiCaricaStorico(query, aggiungi) {
       }
       aggiornaBottoneCaricaAltriStorico_(false);
     })
-    .getStoricoMovimenti(storicoQueryCorrente, storicoOperazioneCorrente, offsetRichiesto, STORICO_PAGE_SIZE);
+    .getStoricoMovimenti(storicoQueryCorrente, storicoOperazioneCorrente, offsetRichiesto, STORICO_PAGE_SIZE, storicoOrdineCorrente);
 }
 
 // Aggiorna testo/stato del pulsante "Carica altre" e il contatore delle righe mostrate.
@@ -1011,14 +1218,11 @@ if (btnCaricaAltriStorico) {
   });
 }
 
+// v10: l'ordinamento è applicato dal SERVER (parametro "ordine"), così "Più vecchi prima"
+// parte davvero dai movimenti più vecchi e la paginazione resta coerente. Il riordino locale
+// (che dipendeva anche dal parsing delle date) non serve più.
 function applicaOrdinamentoStorico(elenco) {
-  return [...elenco].sort((a, b) => {
-    const da = new Date(a.data);
-    const db = new Date(b.data);
-    if (isNaN(da.getTime())) return 1;
-    if (isNaN(db.getTime())) return -1;
-    return storicoSortDir === 'asc' ? da - db : db - da;
-  });
+  return elenco;
 }
 
 function renderizzaTabellaStorico(rows) {
@@ -1033,7 +1237,7 @@ function renderizzaTabellaStorico(rows) {
 
   rows.forEach(r => {
     const tr = document.createElement('tr');
-    let badgeClasse = String(r.movimento).toLowerCase();
+    let badgeClasse = escapeHtml(String(r.movimento).toLowerCase());
     let coloreQta = '#fff';
     if (r.movimento === 'CARICO') coloreQta = 'var(--green)';
     
@@ -1056,10 +1260,7 @@ function renderizzaTabellaStorico(rows) {
   });
 }
 
-// Il click sull'intestazione "Data e Ora" riordina SOLO le righe già caricate in
-// memoria (nessuna nuova richiesta al backend): la paginazione avanza indipendentemente
-// dall'ordinamento scelto. Ricerca e Tipo Operazione sono già stati applicati dal
-// backend, quindi qui basta riordinare storicoDatiCorrenti così com'è.
+// Il click sull'intestazione "Data e Ora" inverte l'ordine e ricarica dal server.
 const thStoricoData = document.getElementById('thStoricoData');
 if (thStoricoData) {
   thStoricoData.addEventListener('click', () => {
@@ -1068,8 +1269,9 @@ if (thStoricoData) {
       document.getElementById('storicoFiltroOrdine').value = storicoSortDir;
     }
 
-    renderizzaTabellaStorico(applicaOrdinamentoStorico(storicoDatiCorrenti));
     aggiornaIndicatoreOrdinamento('thStoricoData', storicoSortDir);
+    // v10: cambiare l'ordine richiede una nuova lettura dal server (riparte dalla prima pagina).
+    eseguiCaricaStorico(storicoQueryCorrente);
   });
 }
 
@@ -1080,7 +1282,7 @@ function scaricaFileFlusso_(res) {
   const a = document.createElement('a');
   a.href = url; a.download = res.nomeFile;
   document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
+  document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 const btnExportGiacenze = document.getElementById('btnExportGiacenze');
@@ -1113,9 +1315,26 @@ if (formImpostazioni) {
   formImpostazioni.addEventListener('submit', function(e) {
     e.preventDefault();
     const giorni = this.querySelector('[name=giorniAvviso]').value;
+    const giorniPriorita = this.querySelector('[name=giorniPriorita]').value;
     const btn = this.querySelector('button[type=submit]');
+
+    // Validazione lato client: la soglia di priorità è per definizione un sottoinsieme
+    // della soglia generale di preavviso, quindi non ha senso che sia più ampia. Si
+    // verifica qui prima di chiamare il backend, per un feedback immediato (la stessa
+    // regola è comunque applicata anche lato server, vedi salvaImpostazioniScadenza).
+    if (Number(giorniPriorita) > Number(giorni)) {
+      alert('La Soglia Priorità di Utilizzo non può essere maggiore della Soglia Pre-Avviso Scadenza.');
+      return;
+    }
+
     btn.disabled = true; btn.textContent = 'Salvataggio...';
 
+    // Le due soglie sono salvate con UNA SOLA chiamata atomica (salvaImpostazioniScadenza),
+    // non con due chiamate separate in sequenza: con due chiamate, salvare prima l'una e
+    // poi l'altra creerebbe una finestra in cui solo una delle due è aggiornata, facendo
+    // fallire per errore una validazione incrociata legittima (es. abbassare entrambe le
+    // soglie insieme) a seconda solo dell'ordine delle chiamate. Vedi il commento su
+    // salvaImpostazioniScadenza() in Alerts.js per il dettaglio.
     google.script.run
       .withSuccessHandler(() => {
         btn.disabled = false; btn.textContent = '💾 Salva Impostazioni';
@@ -1126,7 +1345,7 @@ if (formImpostazioni) {
         btn.disabled = false; btn.textContent = '💾 Salva Impostazioni';
         alert('Errore: ' + err.message);
       })
-      .salvaGiorniAvviso(giorni);
+      .salvaImpostazioniScadenza(giorni, giorniPriorita);
   });
 }
 
@@ -1200,7 +1419,7 @@ if (btnCreaBackup) {
 }
 
 function eseguiRipristinoBackup(id) {
-  const conferma = confirm("Il ripristino sovrascriverà tutti i dati attuali. Procedere?");
+  const conferma = confirm("Il ripristino sostituirà Prodotti, Giacenze e Movimenti con quelli del backup (verrà creata prima una copia di emergenza). Utenti e impostazioni non cambiano. Procedere?");
   if (!conferma) return;
 
   const overlay = document.createElement('div');
@@ -1213,8 +1432,12 @@ function eseguiRipristinoBackup(id) {
   google.script.run
     .withSuccessHandler(res => {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      if (res.success) {
-        alert('Ripristino completato!');
+      // v10: il backend restituiva {ok:true} mentre qui si controllava res.success: dopo un
+      // ripristino riuscito non compariva nessun messaggio e i dati non venivano ricaricati.
+      if (res && (res.ok || res.success)) {
+        alert('Ripristino completato!' +
+          '\n\nRipristinati: Prodotti, Giacenze e Movimenti. Utenti, sessioni e impostazioni NON sono state toccate.' +
+          (res.backupEmergenza ? '\n\nCopia di emergenza dello stato precedente: ' + res.backupEmergenza : ''));
         // BUGFIX: le web app di Apps Script girano sempre in un iframe sandboxato su
         // un'origine diversa da quella del frame superiore (script.google.com vs
         // *.googleusercontent.com). window.top.location.reload() è un accesso
@@ -1274,7 +1497,7 @@ if (formModifica) {
           if (res.refreshNecessario) init();
           localGiacenze = res.nuoveGiacenze || localGiacenze;
           if (res.nuoviAlerts) { localAlerts = res.nuoviAlerts; renderizzaDashboard(res.nuoviAlerts); }
-          renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
+          applicaFiltroGiacenzeCorrente_();
           popolaTendinaScarico(localGiacenze);
           alert('Articolo aggiornato.');
           if (document.querySelector('.nav-btn[data-tab="storico"]').classList.contains('active')) {
@@ -1289,65 +1512,44 @@ if (formModifica) {
 }
 
 /**
- * STAMPA PDF GIACENZE
+ * STAMPA REPORT (Giacenze / Sottoscorta)
+ * v10: window.open() veniva chiamato DOPO la risposta di rete, cioè fuori dal gesto
+ * dell'utente: i popup blocker (Safari/iOS in particolare) lo bloccavano e `win` era null,
+ * con un TypeError silenzioso. Ora la finestra si apre SUBITO al click (con un messaggio di
+ * attesa) e viene riempita quando arriva il report; se il browser la blocca lo si segnala.
  */
-function eseguiStampaPdfGiacenze() {
-  const btn = document.getElementById('btnStampaPDF');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = '⏱️ Generazione...';
+function stampaReport_(btnId, testoBtn, azione) {
+  const btn = document.getElementById(btnId);
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('Il browser ha bloccato la finestra di stampa. Consenti i popup per questo sito e riprova.');
+    return;
   }
+  win.document.write('<p style="font-family:sans-serif;padding:20px;">Generazione del report in corso...</p>');
+  if (btn) { btn.disabled = true; btn.textContent = '⏱️ Generazione...'; }
+  const ripristinaBtn = () => { if (btn) { btn.disabled = false; btn.textContent = testoBtn; } };
 
   google.script.run
     .withSuccessHandler(htmlContent => {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '📄 Stampa PDF Giacenze';
-      }
-      const win = window.open('', '_blank', 'width=800,height=600');
+      ripristinaBtn();
+      win.document.open();
       win.document.write(htmlContent);
       win.document.close();
-      setTimeout(() => { win.print(); }, 500);
+      setTimeout(() => { win.focus(); win.print(); }, 500);
     })
     .withFailureHandler(err => {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '📄 Stampa PDF Giacenze';
-      }
+      ripristinaBtn();
+      try { win.close(); } catch (e) {}
       alert('Errore nella generazione PDF: ' + err.message);
-    })
-    .generaHtmlPdfGiacenze();
+    })[azione]();
 }
 
-/**
- * STAMPA PDF SOTTOSCORTA
- */
-function eseguiStampaPdfSottoScorta() {
-  const btn = document.getElementById('btnStampaPdfSottoScorta');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = '⏱️ Generazione...';
-  }
+function eseguiStampaPdfGiacenze() {
+  stampaReport_('btnStampaPDF', '📄 Stampa PDF Giacenze', 'generaHtmlPdfGiacenze');
+}
 
-  google.script.run
-    .withSuccessHandler(htmlContent => {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '📉 Stampa PDF Sottoscorta';
-      }
-      const win = window.open('', '_blank', 'width=800,height=600');
-      win.document.write(htmlContent);
-      win.document.close();
-      setTimeout(() => { win.print(); }, 500);
-    })
-    .withFailureHandler(err => {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '📉 Stampa PDF Sottoscorta';
-      }
-      alert('Errore nella generazione PDF: ' + err.message);
-    })
-    .generaHtmlPdfSottoScorta();
+function eseguiStampaPdfSottoScorta() {
+  stampaReport_('btnStampaPdfSottoScorta', '📉 Stampa PDF Sottoscorta', 'generaHtmlPdfSottoScorta');
 }
 
 const btnStampaPdfSottoScorta = document.getElementById('btnStampaPdfSottoScorta');
@@ -1370,7 +1572,7 @@ function eseguiEliminaArticolo(codice, descrizione) {
       if (res.refreshNecessario) init();
           localGiacenze = res.nuoveGiacenze || localGiacenze;
       if (res.nuoviAlerts) { localAlerts = res.nuoviAlerts; renderizzaDashboard(res.nuoviAlerts); }
-      renderizzaTabellaGiacenze(applicaOrdinamentoGiacenze(localGiacenze), localAlerts);
+      applicaFiltroGiacenzeCorrente_();
       popolaTendinaScarico(localGiacenze);
       alert('Articolo eliminato.');
       if (document.querySelector('.nav-btn[data-tab="storico"]').classList.contains('active')) {
