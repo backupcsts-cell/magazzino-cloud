@@ -73,6 +73,10 @@
      semplice "in scadenza" arancione) per farlo risaltare subito nella tabella Giacenze. */
   tr.tr-priority td { background-color: rgba(255, 51, 102, 0.09); color: #ffb3c6; }
   tr.tr-priority td:first-child { border-left: 3px solid var(--red); }
+  /* v12: pannello "Priorità di Utilizzo" in cima alla Dashboard, tracciato in rosso */
+  .box-priorita { margin-bottom: 24px; padding: 16px; border-radius: 10px; background: rgba(255, 51, 102, 0.08); border: 2px solid var(--red); box-shadow: 0 0 0 3px rgba(255, 51, 102, 0.12), 0 0 18px rgba(255, 51, 102, 0.25); }
+  .riga-priorita { background: rgba(255, 51, 102, 0.10); border: 1px solid var(--red); border-left: 5px solid var(--red); border-radius: 6px; padding: 10px 14px; }
+  .riga-priorita.scaduto { background: rgba(255, 51, 102, 0.20); }
   .badge.priorita { background: rgba(255, 51, 102, 0.18); color: var(--red); }
   .badge { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
   /* BUGFIX: il markup genera classi come "badge farmaco", "badge carico", "badge modifica"

@@ -79,7 +79,7 @@
       <div style="margin-top:auto; display:flex; flex-direction:column; gap:10px;">
         <button type="button" id="btnLogout" class="btn btn-secondary btn-sm">🚪 Esci</button>
         <div style="font-size:11px; color:var(--text-muted); text-align:center;">
-          v11 • Email+OTP • Transazionale
+          v12 • Email+OTP • Transazionale
         </div>
       </div>
     </aside>
@@ -87,6 +87,12 @@
     <main class="main-content">
       <div id="tab-dashboard" class="tab-content active">
         <h2>📊 Stato Attuale del Magazzino</h2>
+
+        <div id="scadenzePrioritarieBox" class="box-priorita" style="display:none;">
+          <h3 style="color:#fff; font-size:17px; margin:0 0 4px 0; display:flex; align-items:center; gap:8px;">🔴 Prodotti in Scadenza — Priorità di Utilizzo</h3>
+          <p style="color:var(--text-muted); font-size:12px; margin:0 0 12px 0;">Lotti da usare per primi (logica FEFO), ordinati dal più urgente al meno urgente.</p>
+          <div id="scadenzePrioritarieDettaglio" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
 
         <div id="alertsPanel" class="alerts-grid" style="margin-bottom: 24px;"></div>
 
@@ -103,12 +109,6 @@
               📧 Invia Notifica Scadenze
             </button>
           </div>
-        </div>
-
-        <div id="scadenzePrioritarieBox" style="margin-bottom: 24px; background: rgba(255, 51, 102, 0.05); border: 1px solid rgba(255, 51, 102, 0.3); padding: 16px; border-radius: 8px; display:none;">
-          <h3 style="color:#fff; font-size:16px; margin-bottom:4px; display:flex; align-items:center; gap:8px;">🔴 Prodotti in Scadenza — Priorità di Utilizzo</h3>
-          <p style="color:var(--text-muted); font-size:12px; margin:0 0 12px 0;">Lotti da usare per primi (logica FEFO), ordinati dal più urgente al meno urgente.</p>
-          <div id="scadenzePrioritarieDettaglio" style="display:flex; flex-direction:column; gap:8px;"></div>
         </div>
 
         <div style="margin-bottom: 32px; background: rgba(255, 51, 102, 0.03); border: 1px solid rgba(255, 51, 102, 0.2); padding: 16px; border-radius: 8px;">

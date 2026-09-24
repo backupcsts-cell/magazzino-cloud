@@ -48,11 +48,26 @@
   // un limite più alto; tutte le altre falliscono con un messaggio chiaro invece di
   // lasciare la UI in "caricamento" all'infinito.
   const TIMEOUT_DEFAULT_MS_ = 60 * 1000;
+  const TIMEOUT_LETTURA_MS_ = 120 * 1000; // v12: letture (init/dashboard) più tolleranti: avvio a freddo di Apps Script + molti dati
   const TIMEOUT_LUNGO_MS_ = 5 * 60 * 1000;
   const AZIONI_LUNGHE_ = ['backupManuale', 'ripristinaBackup'];
+  // v12: azioni di sola lettura: timeout esteso e UN nuovo tentativo automatico se scadono o la
+  // rete cade (sono sicure da ripetere; il secondo tentativo trova spesso cache già calde).
+  const AZIONI_LETTURA_ = ['init', 'getDashboard', 'getGiacenze', 'getProdotti', 'getAlerts'];
   const AZIONI_DI_SCRITTURA_ = ['eseguiCarico', 'eseguiScarico', 'salvaModificaArticolo', 'eliminaArticoloCompleto', 'salvaGiorniAvviso', 'salvaGiorniPriorita', 'salvaImpostazioniScadenza', 'ripristinaBackup'];
 
   function grezzoFetch_(action, params, richiedeToken) {
+    const tentativo = () => grezzoFetchUnico_(action, params, richiedeToken);
+    if (AZIONI_LETTURA_.indexOf(action) === -1) return tentativo();
+    return tentativo().catch(err => {
+      const msg = String((err && err.message) || '');
+      const transitorio = (err && err.name === 'TypeError') || msg.indexOf('non ha risposto') !== -1 || msg.indexOf('Risposta non valida') === 0;
+      if (!transitorio) throw err;
+      return tentativo();
+    });
+  }
+
+  function grezzoFetchUnico_(action, params, richiedeToken) {
     const sessione = leggiSessione_();
     const body = Object.assign(
       { action: action, appKey: CFG.APP_KEY },
@@ -60,7 +75,8 @@
       params || {}
     );
     const controller = new AbortController();
-    const timeoutMs = AZIONI_LUNGHE_.indexOf(action) !== -1 ? TIMEOUT_LUNGO_MS_ : TIMEOUT_DEFAULT_MS_;
+    const timeoutMs = AZIONI_LUNGHE_.indexOf(action) !== -1 ? TIMEOUT_LUNGO_MS_
+      : (AZIONI_LETTURA_.indexOf(action) !== -1 ? TIMEOUT_LETTURA_MS_ : TIMEOUT_DEFAULT_MS_);
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     return fetch(CFG.API_URL, {
@@ -239,6 +255,7 @@
     getGiacenze: () => callApi('getGiacenze'),
     getProdotti: () => callApi('getProdotti'),
     getAlerts: () => callApi('getAlerts'),
+    getDashboard: () => callApi('getDashboard'),
     eseguiCarico: (a) => callApi('eseguiCarico', { dati: a[0] }),
     eseguiScarico: (a) => callApi('eseguiScarico', { dati: a[0] }),
     salvaModificaArticolo: (a) => callApi('salvaModificaArticolo', { codice: a[0], descrizione: a[1], tipo: a[2], scortaMinima: a[3], note: a[4] }),
@@ -497,7 +514,8 @@ function init() {
   // irraggiungibile, quota superata, ecc.) passava sotto silenzio: la Dashboard restava
   // vuota indefinitamente, senza alcun messaggio che spiegasse il motivo all'utente.
   .withFailureHandler(err => {
-    alert('Errore nel caricamento dei dati: ' + err.message);
+    // v12: invece di un semplice alert senza uscita, si offre di riprovare subito.
+    if (confirm('Errore nel caricamento dei dati: ' + err.message + '\n\nVuoi riprovare ora?')) init();
   })
   .getInizializzazione();
 }
@@ -676,11 +694,7 @@ function renderizzaScadenzePrioritarie(alerts) {
 
   function rigaBox_(g, etichetta, testoGiorni) {
     const div = document.createElement('div');
-    div.style.background = 'rgba(255,255,255,0.02)';
-    div.style.border = '1px solid rgba(255,51,102,0.15)';
-    div.style.borderLeft = '3px solid var(--red)';
-    div.style.borderRadius = '6px';
-    div.style.padding = '10px 14px';
+    div.className = 'riga-priorita' + (etichetta.indexOf('SCADUTO') !== -1 ? ' scaduto' : '');
     div.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:12px; flex-wrap:wrap;">
         <strong style="color:#fff; font-size:13px;">${escapeHtml(g.codice)} — ${escapeHtml(g.descrizione)}</strong>
@@ -963,30 +977,20 @@ if (inputCercaGiacenze) {
 // aggiorna tutta la Dashboard (riepilogo, pannello priorità/scadenze, sotto-scorta e
 // tabella Giacenze), riapplicando anche un eventuale filtro di ricerca già attivo.
 function ricaricaDashboardDalServer_() {
+  // v12: UNA sola chiamata (getDashboard) al posto di getGiacenze + getAlerts, che leggevano
+  // due volte gli stessi fogli e raddoppiavano i tempi di attesa.
   google.script.run
-    .withSuccessHandler(giacenze => {
-      localGiacenze = giacenze;
+    .withSuccessHandler(d => {
+      localGiacenze = d.giacenze;
+      localAlerts = d.alerts;
+      renderizzaDashboard(d.alerts);
       applicaFiltroGiacenzeCorrente_();
       popolaTendinaScarico(localGiacenze);
     })
     .withFailureHandler(err => {
-      console.error('Errore nel ricaricamento delle giacenze:', err);
+      console.error('Errore nel ricaricamento della Dashboard:', err);
     })
-    .getGiacenze();
-
-  google.script.run
-    .withSuccessHandler(alerts => {
-      localAlerts = alerts;
-      renderizzaDashboard(alerts);
-      // La tabella Giacenze dipende anche dagli Avvisi (soglie di evidenziazione
-      // rosso/arancione): la si ri-renderizza anche qui, nel caso la chiamata a
-      // getAlerts() risponda dopo quella a getGiacenze() qui sopra.
-      applicaFiltroGiacenzeCorrente_();
-    })
-    .withFailureHandler(err => {
-      console.error('Errore nel ricaricamento degli avvisi:', err);
-    })
-    .getAlerts();
+    .getDashboard();
 }
 
 const btnInviaNotificaScadenze = document.getElementById('btnInviaNotificaScadenze');
